@@ -385,6 +385,10 @@ label.btn:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 #fbGate .gbtn{display:inline-flex;align-items:center;justify-content:center;gap:10px;padding:10px 18px;border-radius:10px;border:1px solid var(--line,#dbe7df);background:#fff;color:#1b2a21;font:inherit;font-size:15px;font-weight:600;cursor:pointer}
 #fbGate .gbtn:hover{border-color:#005629}
 #fbGate .gerr{color:#b42318;font-size:13px}
+#fbGate .gor{font-size:12.5px;color:var(--muted,#5b6d61);margin-top:4px}
+#fbGate .gmail{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+#fbGate .gmail input{flex:1 1 200px;min-width:0;font:inherit;font-size:14px;padding:9px 12px;border:1px solid var(--line,#dbe7df);border-radius:10px;background:var(--panel-2,#f7faf8);color:inherit}
+#fbGate #fbAct{display:grid;gap:10px;justify-items:center}
 #fbGate code{background:var(--panel-2,#eef3f0);padding:1px 6px;border-radius:5px}
 .fb-acct{position:relative}
 .fb-acct>button{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line,#dbe7df);background:var(--panel,#fff);color:var(--fg,#1b2a21);border-radius:999px;padding:4px 10px 4px 4px;font:inherit;font-size:12.5px;cursor:pointer;max-width:220px}
@@ -449,17 +453,34 @@ label.btn:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const gate = document.getElementById("fbGate"), msg = document.getElementById("fbMsg"), act = document.getElementById("fbAct");
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const say = (html, buttons) => { gate.hidden = false; msg.innerHTML = html; act.innerHTML = buttons || ""; };
 
-let cfg;
-try{ cfg = await import("./firebase-config.js"); }catch(e){ cfg = null; }
-if(!cfg || !cfg.firebaseConfig || !cfg.firebaseConfig.apiKey || /ใส่|PASTE|YOUR_/i.test(cfg.firebaseConfig.apiKey)){
-  say(`ยังไม่ได้ตั้งค่า Firebase — เปิดไฟล์ <code>firebase-config.js</code> ใน GitHub แล้ววางค่าจาก Firebase ตามคู่มือ (README) ขั้นที่ 1`);
-  throw new Error("firebase-config.js is not filled in");
+/* firebase-config.js is read as plain text, so it works whether it holds our template or the whole snippet
+   pasted straight from the Firebase console (imports, "const", comments and all) */
+const DEFAULT_OWNERS = ["shipping@teckbeehang.com"];
+const WEB_BUILD = "2026-11-04f";
+let cfg = null, why = "";
+try{
+  const res = await fetch("./firebase-config.js?t=" + Date.now(), { cache: "no-store" });
+  if(!res.ok) why = `หาไฟล์ <code>firebase-config.js</code> ไม่เจอ (${res.status}) — ตรวจว่าอัปโหลดไว้ชั้นนอกสุดของ repository ข้างไฟล์ index.html และชื่อไฟล์สะกดตรง`;
+  else {
+    const txt = await res.text();
+    const pick = k => { const m = txt.match(new RegExp("[\"']?" + k + "[\"']?\\s*[:=]\\s*[\"']([^\"']+)[\"']")); return m ? m[1].trim() : undefined; };
+    const fc = {}; ["apiKey","authDomain","projectId","storageBucket","messagingSenderId","appId","measurementId"].forEach(k => { const v = pick(k); if(v) fc[k] = v; });
+    const ownLine = (txt.match(/OWNER[^\n]*/) || [""])[0];
+    const owners = ownLine.match(/[^\s"'\[\],;=]+@[^\s"'\[\],;]+/g);
+    if(/PASTE_|YOUR_/i.test(txt) && (!fc.apiKey || /PASTE|YOUR_/i.test(fc.apiKey))) why = `ไฟล์ <code>firebase-config.js</code> ยังเป็นแบบฟอร์มเดิม — ยังไม่ได้วางค่าจาก Firebase หรือยังไม่ได้กด Commit changes<br>ถ้าเพิ่งกด Commit ให้รอ 1–2 นาทีแล้วกด Ctrl+F5`;
+    else if(!fc.apiKey || !fc.projectId || !fc.appId) why = `อ่านไฟล์ <code>firebase-config.js</code> ได้ (${txt.length} ตัวอักษร) แต่ไม่พบ${["apiKey","projectId","appId"].filter(k=>!fc[k]).map(k=>" "+k).join(",")} — วางโค้ดจาก Firebase ให้ครบตั้งแต่บรรทัด apiKey ถึง appId`;
+    else cfg = { firebaseConfig: fc, OWNER_EMAILS: owners && owners.length ? owners : DEFAULT_OWNERS };
+  }
+}catch(e){ why = "อ่านไฟล์ firebase-config.js ไม่ได้: " + esc(e && e.message || e); }
+if(!cfg){
+  say(`ยังไม่ได้ตั้งค่า Firebase<br><span class="gerr">${why}</span><br><small>เวอร์ชันโปรแกรม ${WEB_BUILD}</small>`);
+  throw new Error("firebase-config.js is not usable");
 }
 const OWNERS = (cfg.OWNER_EMAILS || []).map(x => String(x).trim().toLowerCase()).filter(Boolean);
 const app = initializeApp(cfg.firebaseConfig);
@@ -468,10 +489,27 @@ const F = { doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection };
 const provider = new GoogleAuthProvider(); provider.setCustomParameters({ prompt: "select_account" });
 
 const loginBtn = `<button class="gbtn" type="button" id="fbLogin"><svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#4285F4" d="M45 24.5c0-1.6-.1-2.8-.4-4.1H24v7.7h12c-.2 2-1.6 5-4.6 7l6.8 5.3C42.4 36.8 45 31.2 45 24.5z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.6-5.4l-6.8-5.3c-1.9 1.3-4.4 2.2-7.8 2.2-6 0-11-4-12.8-9.4l-7 5.4C7.8 40.6 15.3 46 24 46z"/><path fill="#FBBC05" d="M11.2 28.1c-.5-1.3-.7-2.7-.7-4.1s.3-2.8.7-4.1l-7-5.4C2.8 17.4 2 20.6 2 24s.8 6.6 2.2 9.5l7-5.4z"/><path fill="#EA4335" d="M24 10.5c4.1 0 6.9 1.8 8.5 3.3l6.2-6C34.9 4.3 30 2 24 2 15.3 2 7.8 7.4 4.2 14.5l7 5.4C13 14.5 18 10.5 24 10.5z"/></svg>เข้าสู่ระบบด้วย Google</button>`;
+const emailForm = (note) => `<div class="gor">หรือเข้าสู่ระบบด้วยอีเมลบริษัท (ไม่ต้องมีบัญชี Google)</div>
+  <form id="fbMailForm" class="gmail"><input id="fbMail" type="email" required placeholder="name@teckbeehang.com" autocomplete="email" aria-label="อีเมล"><button class="gbtn" type="submit">${note || "ส่งลิงก์เข้าสู่ระบบ"}</button></form>`;
+const loginOptions = () => loginBtn + emailForm();
+const cleanUrl = () => location.href.split("#")[0].split("?")[0];
+document.addEventListener("submit", async e => {
+  if(e.target.id !== "fbMailForm") return; e.preventDefault();
+  const email = document.getElementById("fbMail").value.trim().toLowerCase(); if(!email) return;
+  if(isSignInWithEmailLink(auth, location.href)){
+    try{ await signInWithEmailLink(auth, email, location.href); localStorage.removeItem("fbEmailForSignIn"); history.replaceState(null, "", cleanUrl()); }
+    catch(err){ say(`เข้าสู่ระบบไม่สำเร็จ <span class="gerr">(${esc(err && err.code || err)})</span> — ลิงก์อาจหมดอายุหรือใช้ไปแล้ว ขอลิงก์ใหม่`, loginOptions()); history.replaceState(null, "", cleanUrl()); }
+    return;
+  }
+  try{ await sendSignInLinkToEmail(auth, email, { url: cleanUrl(), handleCodeInApp: true }); try{ localStorage.setItem("fbEmailForSignIn", email); }catch(_){}
+    say(`ส่งลิงก์เข้าสู่ระบบไปที่ <b>${esc(email)}</b> แล้ว<br>เปิดอีเมลนั้นแล้วกดลิงก์ในเบราว์เซอร์เครื่องนี้ (ถ้าไม่เห็น ดูในโฟลเดอร์ Junk / Spam)`, `<button class="gbtn" type="button" id="fbBack">กลับ</button>`); }
+  catch(err){ say(`ส่งลิงก์ไม่สำเร็จ <span class="gerr">(${esc(err && err.code || err)})</span> — ตรวจว่าเปิด “Email link (passwordless sign-in)” ใน Firebase แล้ว`, loginOptions()); }
+});
 document.addEventListener("click", async e => {
+  if(e.target.closest("#fbBack")) say("เข้าสู่ระบบด้วยบัญชีที่ผู้ดูแลระบบเพิ่มไว้", loginOptions());
   if(e.target.closest("#fbLogin")){ try{ await signInWithPopup(auth, provider); }catch(err){
       if(err && /popup/.test(err.code || "")) return signInWithRedirect(auth, provider);
-      say(`เข้าสู่ระบบไม่สำเร็จ <span class="gerr">(${esc(err && err.code || err)})</span>`, loginBtn); } }
+      say(`เข้าสู่ระบบไม่สำเร็จ <span class="gerr">(${esc(err && err.code || err)})</span>`, loginOptions()); } }
   if(e.target.closest("#fbLogout")) signOut(auth).then(() => location.reload());
 });
 getRedirectResult(auth).catch(() => {});
@@ -479,7 +517,13 @@ getRedirectResult(auth).catch(() => {});
 let started = false;
 onAuthStateChanged(auth, async user => {
   if(started){ if(!user) location.reload(); return; }
-  if(!user){ say("เข้าสู่ระบบด้วยบัญชี Google ที่ผู้ดูแลระบบเพิ่มไว้", loginBtn); return; }
+  if(!user){
+    if(isSignInWithEmailLink(auth, location.href)){
+      let saved = ""; try{ saved = localStorage.getItem("fbEmailForSignIn") || ""; }catch(_){}
+      if(saved){ try{ await signInWithEmailLink(auth, saved, location.href); localStorage.removeItem("fbEmailForSignIn"); history.replaceState(null, "", cleanUrl()); return; }catch(err){ say(`ลิงก์ใช้ไม่ได้ <span class="gerr">(${esc(err && err.code || err)})</span> — ลิงก์อาจหมดอายุหรือใช้ไปแล้ว ขอลิงก์ใหม่`, loginOptions()); history.replaceState(null, "", cleanUrl()); return; } }
+      say("ยืนยันอีเมลที่ใช้ขอลิงก์เข้าสู่ระบบ (เปิดลิงก์คนละเครื่องกับที่ขอ)", emailForm("เข้าสู่ระบบ")); return;
+    }
+    say("เข้าสู่ระบบด้วยบัญชีที่ผู้ดูแลระบบเพิ่มไว้", loginOptions()); return; }
   say(`กำลังตรวจสิทธิ์ของ ${esc(user.email)}…`);
   const email = (user.email || "").toLowerCase();
   let role = OWNERS.includes(email) ? "owner" : null, members = null;
@@ -514,7 +558,7 @@ async function membersDialog(){
   let d = document.getElementById("fbModal");
   if(!d){ d = document.createElement("div"); d.id = "fbModal"; d.className = "fb-modal"; d.setAttribute("role","dialog"); d.setAttribute("aria-modal","true"); d.setAttribute("aria-labelledby","fbMTitle"); document.body.appendChild(d); }
   d.innerHTML = `<div class="box"><h2 id="fbMTitle">จัดการผู้ใช้</h2>
-    <p class="hint">ใส่อีเมล Google หนึ่งบรรทัดต่อหนึ่งคน · ผู้ดูแลระบบ: ${esc(OWNERS.join(", "))} (กำหนดในไฟล์ firebase-config.js และ firestore.rules)</p>
+    <p class="hint">ใส่อีเมลหนึ่งบรรทัดต่อหนึ่งคน (อีเมลบริษัทหรือ Gmail ก็ได้) · ผู้ดูแลระบบ: ${esc(OWNERS.join(", "))} (กำหนดในไฟล์ firebase-config.js และ firestore.rules)</p>
     <label>ผู้แก้ไข — กรอกและแก้ข้อมูลได้<textarea id="fbEd" spellcheck="false">${esc((m.editors || []).join("\n"))}</textarea></label>
     <label>ดูอย่างเดียว — เปิดดู Dashboard และเอกสารได้ แต่แก้ไม่ได้<textarea id="fbVw" spellcheck="false">${esc((m.viewers || []).join("\n"))}</textarea></label>
     <p class="hint" id="fbMMsg"></p>

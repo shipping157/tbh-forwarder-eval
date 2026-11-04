@@ -389,6 +389,11 @@ label.btn:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 #fbGate .gmail{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
 #fbGate .gmail input{flex:1 1 200px;min-width:0;font:inherit;font-size:14px;padding:9px 12px;border:1px solid var(--line,#dbe7df);border-radius:10px;background:var(--panel-2,#f7faf8);color:inherit}
 #fbGate #fbAct{display:grid;gap:10px;justify-items:center}
+#fbGate .gform{display:grid;gap:10px;width:100%}
+#fbGate .gform input{font:inherit;font-size:15px;padding:10px 12px;border:1px solid var(--line,#dbe7df);border-radius:10px;background:var(--panel-2,#f7faf8);color:inherit;min-width:0}
+#fbGate .gform .gbtn{background:#005629;color:#fff;border-color:#005629}
+#fbGate .glink{background:none;border:0;padding:4px;font:inherit;font-size:12.5px;color:var(--muted,#5b6d61);text-decoration:underline;cursor:pointer}
+.fb-modal input{font:inherit;font-size:14px;border:1px solid var(--line,#dbe7df);border-radius:8px;padding:8px 10px;background:var(--panel-2,#f7faf8);color:inherit}
 #fbGate code{background:var(--panel-2,#eef3f0);padding:1px 6px;border-radius:5px}
 .fb-acct{position:relative}
 .fb-acct>button{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line,#dbe7df);background:var(--panel,#fff);color:var(--fg,#1b2a21);border-radius:999px;padding:4px 10px 4px 4px;font:inherit;font-size:12.5px;cursor:pointer;max-width:220px}
@@ -436,9 +441,12 @@ label.btn:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
     return {
       can: async name => name === "data.write" ? c.role !== "viewer" : null,
       isOwner: async () => c.role === "owner", canEdit: async () => c.role === "owner",
-      id: async () => u.uid, name: async () => u.displayName || u.email || "",
-      me: async () => ({ id: u.uid, name: u.displayName || u.email || "", email: u.email }),
+      id: async () => c.team ? "team-" + c.device : u.uid,
+      /* shared team account: the person's own name comes from this device (asked at sign-in), so the app records it with each edit */
+      name: async () => c.team ? "" : (u.displayName || u.email || ""),
+      me: async () => ({ id: c.team ? "team-" + c.device : u.uid, name: c.team ? c.myName() : (u.displayName || u.email || ""), email: u.email }),
       profiles: async ids => { const out = {}; await Promise.all([].concat(ids).filter(Boolean).map(async id => {
+          if(/^team-/.test(id)) people[id] = "";
           if(!(id in people)){ try{ const s = await c.F.getDoc(c.F.doc(c.fs, "people/" + id)); people[id] = s.exists() ? (s.data().name || s.data().email || "") : ""; }catch(_){ people[id] = ""; } }
           out[id] = { id, name: people[id], guest: false }; })); return out; }
     }; }
@@ -453,7 +461,7 @@ label.btn:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, signInWithEmailAndPassword, EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const gate = document.getElementById("fbGate"), msg = document.getElementById("fbMsg"), act = document.getElementById("fbAct");
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -462,7 +470,9 @@ const say = (html, buttons) => { gate.hidden = false; msg.innerHTML = html; act.
 /* firebase-config.js is read as plain text, so it works whether it holds our template or the whole snippet
    pasted straight from the Firebase console (imports, "const", comments and all) */
 const DEFAULT_OWNERS = ["shipping@teckbeehang.com"];
-const WEB_BUILD = "2026-11-04f";
+/* everyone on the team signs in to this one Firebase account with the team password (no mailbox is needed for it) */
+const DEFAULT_TEAM_EMAIL = "forwarder-team@teckbeehang.com";
+const WEB_BUILD = "2026-11-04g";
 let cfg = null, why = "";
 try{
   const res = await fetch("./firebase-config.js?t=" + Date.now(), { cache: "no-store" });
@@ -475,13 +485,15 @@ try{
     const owners = ownLine.match(/[^\s"'\[\],;=]+@[^\s"'\[\],;]+/g);
     if(/PASTE_|YOUR_/i.test(txt) && (!fc.apiKey || /PASTE|YOUR_/i.test(fc.apiKey))) why = `ไฟล์ <code>firebase-config.js</code> ยังเป็นแบบฟอร์มเดิม — ยังไม่ได้วางค่าจาก Firebase หรือยังไม่ได้กด Commit changes<br>ถ้าเพิ่งกด Commit ให้รอ 1–2 นาทีแล้วกด Ctrl+F5`;
     else if(!fc.apiKey || !fc.projectId || !fc.appId) why = `อ่านไฟล์ <code>firebase-config.js</code> ได้ (${txt.length} ตัวอักษร) แต่ไม่พบ${["apiKey","projectId","appId"].filter(k=>!fc[k]).map(k=>" "+k).join(",")} — วางโค้ดจาก Firebase ให้ครบตั้งแต่บรรทัด apiKey ถึง appId`;
-    else cfg = { firebaseConfig: fc, OWNER_EMAILS: owners && owners.length ? owners : DEFAULT_OWNERS };
+    else { const tm = txt.match(/TEAM_EMAIL[^\n]*?([^\s"'=]+@[^\s"';,]+)/);
+      cfg = { firebaseConfig: fc, OWNER_EMAILS: owners && owners.length ? owners : DEFAULT_OWNERS, TEAM_EMAIL: (tm ? tm[1] : DEFAULT_TEAM_EMAIL).toLowerCase() }; }
   }
 }catch(e){ why = "อ่านไฟล์ firebase-config.js ไม่ได้: " + esc(e && e.message || e); }
 if(!cfg){
   say(`ยังไม่ได้ตั้งค่า Firebase<br><span class="gerr">${why}</span><br><small>เวอร์ชันโปรแกรม ${WEB_BUILD}</small>`);
   throw new Error("firebase-config.js is not usable");
 }
+const TEAM_EMAIL = cfg.TEAM_EMAIL;
 const OWNERS = (cfg.OWNER_EMAILS || []).map(x => String(x).trim().toLowerCase()).filter(Boolean);
 const app = initializeApp(cfg.firebaseConfig);
 const fs = getFirestore(app), auth = getAuth(app);
@@ -491,67 +503,131 @@ const provider = new GoogleAuthProvider(); provider.setCustomParameters({ prompt
 const loginBtn = `<button class="gbtn" type="button" id="fbLogin"><svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#4285F4" d="M45 24.5c0-1.6-.1-2.8-.4-4.1H24v7.7h12c-.2 2-1.6 5-4.6 7l6.8 5.3C42.4 36.8 45 31.2 45 24.5z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.6-5.4l-6.8-5.3c-1.9 1.3-4.4 2.2-7.8 2.2-6 0-11-4-12.8-9.4l-7 5.4C7.8 40.6 15.3 46 24 46z"/><path fill="#FBBC05" d="M11.2 28.1c-.5-1.3-.7-2.7-.7-4.1s.3-2.8.7-4.1l-7-5.4C2.8 17.4 2 20.6 2 24s.8 6.6 2.2 9.5l7-5.4z"/><path fill="#EA4335" d="M24 10.5c4.1 0 6.9 1.8 8.5 3.3l6.2-6C34.9 4.3 30 2 24 2 15.3 2 7.8 7.4 4.2 14.5l7 5.4C13 14.5 18 10.5 24 10.5z"/></svg>เข้าสู่ระบบด้วย Google</button>`;
 const emailForm = (note) => `<div class="gor">หรือเข้าสู่ระบบด้วยอีเมลบริษัท (ไม่ต้องมีบัญชี Google)</div>
   <form id="fbMailForm" class="gmail"><input id="fbMail" type="email" required placeholder="name@teckbeehang.com" autocomplete="email" aria-label="อีเมล"><button class="gbtn" type="submit">${note || "ส่งลิงก์เข้าสู่ระบบ"}</button></form>`;
-const loginOptions = () => loginBtn + emailForm();
+const NAME_KEY = "tbh-checker-name";
+const savedName = () => { try{ return localStorage.getItem(NAME_KEY) || ""; }catch(_){ return memName; } };
+let memName = "";
+const setName = n => { memName = n; try{ localStorage.setItem(NAME_KEY, n); }catch(_){} };
+const deviceId = (() => { let d = ""; try{ d = localStorage.getItem("tbh-device") || ""; if(!d){ d = Math.random().toString(36).slice(2, 10); localStorage.setItem("tbh-device", d); } }catch(_){ d = Math.random().toString(36).slice(2, 10); } return d; })();
+const teamForm = () => `<form id="fbTeamForm" class="gform">
+    <input id="fbName" required maxlength="60" placeholder="ชื่อของคุณ" aria-label="ชื่อของคุณ" autocomplete="name" value="${esc(savedName())}">
+    <input id="fbPass" type="password" required placeholder="รหัสผ่านทีม" aria-label="รหัสผ่านทีม" autocomplete="current-password">
+    <button class="gbtn" type="submit">เข้าสู่ระบบ</button></form>
+  <button type="button" class="glink" id="fbAdmin">ผู้ดูแลระบบ: เข้าสู่ระบบด้วยอีเมล</button>`;
+const TEAM_MSG = "ใส่ชื่อของคุณและรหัสผ่านทีม<br><small>ชื่อจะแสดงในประวัติการแก้ไข · ระบบจำการเข้าสู่ระบบไว้ ไม่ต้องใส่ทุกครั้ง</small>";
+const loginOptions = () => teamForm();
+const adminOptions = () => loginBtn + emailForm() + `<button type="button" class="glink" id="fbBack">กลับไปเข้าสู่ระบบด้วยรหัสผ่านทีม</button>`;
+const TEAM_ERR = {
+  "auth/invalid-credential": "รหัสผ่านไม่ถูกต้อง", "auth/wrong-password": "รหัสผ่านไม่ถูกต้อง", "auth/invalid-login-credentials": "รหัสผ่านไม่ถูกต้อง",
+  "auth/user-not-found": "ยังไม่มีบัญชีทีมใน Firebase", "auth/too-many-requests": "ใส่รหัสผิดหลายครั้ง ระบบพักไว้ชั่วคราว รอสักครู่แล้วลองใหม่",
+  "auth/operation-not-allowed": "ยังไม่ได้เปิด Email/Password ใน Firebase › Authentication › Sign-in method",
+  "auth/user-disabled": "บัญชีทีมถูกปิดใช้งานใน Firebase", "auth/network-request-failed": "เชื่อมต่ออินเทอร์เน็ตไม่ได้ ลองใหม่อีกครั้ง" };
+document.addEventListener("submit", async e => {
+  if(e.target.id === "fbNameForm"){ e.preventDefault(); const n = document.getElementById("fbName").value.trim(); if(!n) return; setName(n); if(pendingStart){ const f = pendingStart; pendingStart = null; f(); } return; }
+  if(e.target.id !== "fbTeamForm") return; e.preventDefault();
+  const n = document.getElementById("fbName").value.trim(), pw = document.getElementById("fbPass").value;
+  if(!n || !pw) return; setName(n);
+  const b = e.target.querySelector("button"); b.disabled = true; b.textContent = "กำลังเข้าสู่ระบบ…";
+  try{ await signInWithEmailAndPassword(auth, TEAM_EMAIL, pw); }
+  catch(err){ const code = err && err.code || String(err);
+    const hint = /invalid|not-found/.test(code) ? `<br><small>ถ้าเพิ่งตั้งระบบ: ผู้ดูแลต้องสร้างบัญชี <code>${esc(TEAM_EMAIL)}</code> ใน Firebase › Authentication › Users ก่อน</small>` : "";
+    say(`<span class="gerr">${esc(TEAM_ERR[code] || "เข้าสู่ระบบไม่สำเร็จ")} (${esc(code)})</span>${hint}`, teamForm());
+    const pi = document.getElementById("fbPass"); if(pi) pi.focus(); }
+});
 const cleanUrl = () => location.href.split("#")[0].split("?")[0];
 document.addEventListener("submit", async e => {
   if(e.target.id !== "fbMailForm") return; e.preventDefault();
   const email = document.getElementById("fbMail").value.trim().toLowerCase(); if(!email) return;
   if(isSignInWithEmailLink(auth, location.href)){
     try{ await signInWithEmailLink(auth, email, location.href); localStorage.removeItem("fbEmailForSignIn"); history.replaceState(null, "", cleanUrl()); }
-    catch(err){ say(`เข้าสู่ระบบไม่สำเร็จ <span class="gerr">(${esc(err && err.code || err)})</span> — ลิงก์อาจหมดอายุหรือใช้ไปแล้ว ขอลิงก์ใหม่`, loginOptions()); history.replaceState(null, "", cleanUrl()); }
+    catch(err){ say(`เข้าสู่ระบบไม่สำเร็จ <span class="gerr">(${esc(err && err.code || err)})</span> — ลิงก์อาจหมดอายุหรือใช้ไปแล้ว ขอลิงก์ใหม่`, adminOptions()); history.replaceState(null, "", cleanUrl()); }
     return;
   }
   try{ await sendSignInLinkToEmail(auth, email, { url: cleanUrl(), handleCodeInApp: true }); try{ localStorage.setItem("fbEmailForSignIn", email); }catch(_){}
     say(`ส่งลิงก์เข้าสู่ระบบไปที่ <b>${esc(email)}</b> แล้ว<br>เปิดอีเมลนั้นแล้วกดลิงก์ในเบราว์เซอร์เครื่องนี้ (ถ้าไม่เห็น ดูในโฟลเดอร์ Junk / Spam)`, `<button class="gbtn" type="button" id="fbBack">กลับ</button>`); }
-  catch(err){ say(`ส่งลิงก์ไม่สำเร็จ <span class="gerr">(${esc(err && err.code || err)})</span> — ตรวจว่าเปิด “Email link (passwordless sign-in)” ใน Firebase แล้ว`, loginOptions()); }
+  catch(err){ say(`ส่งลิงก์ไม่สำเร็จ <span class="gerr">(${esc(err && err.code || err)})</span> — ตรวจว่าเปิด “Email link (passwordless sign-in)” ใน Firebase แล้ว`, adminOptions()); }
 });
 document.addEventListener("click", async e => {
-  if(e.target.closest("#fbBack")) say("เข้าสู่ระบบด้วยบัญชีที่ผู้ดูแลระบบเพิ่มไว้", loginOptions());
+  if(e.target.closest("#fbBack")) say(TEAM_MSG, loginOptions());
+  if(e.target.closest("#fbAdmin")) say("ผู้ดูแลระบบ / บัญชีส่วนตัวที่ได้รับสิทธิ์", adminOptions());
   if(e.target.closest("#fbLogin")){ try{ await signInWithPopup(auth, provider); }catch(err){
       if(err && /popup/.test(err.code || "")) return signInWithRedirect(auth, provider);
-      say(`เข้าสู่ระบบไม่สำเร็จ <span class="gerr">(${esc(err && err.code || err)})</span>`, loginOptions()); } }
+      say(`เข้าสู่ระบบไม่สำเร็จ <span class="gerr">(${esc(err && err.code || err)})</span>`, adminOptions()); } }
   if(e.target.closest("#fbLogout")) signOut(auth).then(() => location.reload());
 });
 getRedirectResult(auth).catch(() => {});
 
-let started = false;
+let started = false, pendingStart = null;
 onAuthStateChanged(auth, async user => {
   if(started){ if(!user) location.reload(); return; }
   if(!user){
     if(isSignInWithEmailLink(auth, location.href)){
       let saved = ""; try{ saved = localStorage.getItem("fbEmailForSignIn") || ""; }catch(_){}
-      if(saved){ try{ await signInWithEmailLink(auth, saved, location.href); localStorage.removeItem("fbEmailForSignIn"); history.replaceState(null, "", cleanUrl()); return; }catch(err){ say(`ลิงก์ใช้ไม่ได้ <span class="gerr">(${esc(err && err.code || err)})</span> — ลิงก์อาจหมดอายุหรือใช้ไปแล้ว ขอลิงก์ใหม่`, loginOptions()); history.replaceState(null, "", cleanUrl()); return; } }
+      if(saved){ try{ await signInWithEmailLink(auth, saved, location.href); localStorage.removeItem("fbEmailForSignIn"); history.replaceState(null, "", cleanUrl()); return; }catch(err){ say(`ลิงก์ใช้ไม่ได้ <span class="gerr">(${esc(err && err.code || err)})</span> — ลิงก์อาจหมดอายุหรือใช้ไปแล้ว ขอลิงก์ใหม่`, adminOptions()); history.replaceState(null, "", cleanUrl()); return; } }
       say("ยืนยันอีเมลที่ใช้ขอลิงก์เข้าสู่ระบบ (เปิดลิงก์คนละเครื่องกับที่ขอ)", emailForm("เข้าสู่ระบบ")); return;
     }
-    say("เข้าสู่ระบบด้วยบัญชีที่ผู้ดูแลระบบเพิ่มไว้", loginOptions()); return; }
+    say(TEAM_MSG, loginOptions()); return; }
+  const email = (user.email || "").toLowerCase(), team = email === TEAM_EMAIL;
+  if(team){
+    const go = () => start(user, "editor", null, true);
+    if(!savedName()){ pendingStart = go; say("ใส่ชื่อของคุณ (แสดงในประวัติการแก้ไข)", `<form id="fbNameForm" class="gform"><input id="fbName" required maxlength="60" placeholder="ชื่อของคุณ" aria-label="ชื่อของคุณ" autocomplete="name"><button class="gbtn" type="submit">เริ่มใช้งาน</button></form>`); return; }
+    return go();
+  }
   say(`กำลังตรวจสิทธิ์ของ ${esc(user.email)}…`);
-  const email = (user.email || "").toLowerCase();
   let role = OWNERS.includes(email) ? "owner" : null, members = null;
   try{ const s = await getDoc(doc(fs, "access/members")); members = s.exists() ? s.data() : null; }catch(_){ members = null; }
   if(!role && members){ const has = k => (members[k] || []).map(x => String(x).toLowerCase()).includes(email); role = has("editors") ? "editor" : has("viewers") ? "viewer" : null; }
   if(!role){ say(`บัญชี <b>${esc(user.email)}</b> ยังไม่ได้รับสิทธิ์ใช้งาน<br>ส่งอีเมลนี้ให้ผู้ดูแลระบบเพิ่มใน “จัดการผู้ใช้” แล้วโหลดหน้านี้ใหม่`, `<button class="gbtn" type="button" id="fbLogout">ออกจากระบบ / เปลี่ยนบัญชี</button>`); return; }
-  started = true;
-  try{ await setDoc(doc(fs, "people/" + user.uid), { name: user.displayName || "", email, at: Date.now() }); }catch(_){}
-  gate.hidden = true;
-  window.__fbResolve({ fs, F, user, role, members });
-  accountMenu(user, role);
+  start(user, role, members, false);
 });
+function start(user, role, members, team){
+  if(started) return; started = true;
+  if(!team) setDoc(doc(fs, "people/" + user.uid), { name: user.displayName || "", email: (user.email || "").toLowerCase(), at: Date.now() }).catch(() => {});
+  gate.hidden = true;
+  window.__fbResolve({ fs, F, user, role, members, team, device: deviceId, myName: savedName });
+  accountMenu(user, role, team);
+}
 
-function accountMenu(user, role){
+function accountMenu(user, role, team){
   const host = document.querySelector("header.top"); if(!host) return;
   const label = { owner:"ผู้ดูแลระบบ", editor:"ผู้แก้ไข", viewer:"ดูอย่างเดียว" }[role];
+  const shown = () => team ? savedName() : (user.displayName || user.email);
   const w = document.createElement("div"); w.className = "fb-acct";
-  w.innerHTML = `<button type="button" id="fbAcctBtn" aria-haspopup="true" aria-expanded="false"><span class="av">${esc((user.displayName || user.email || "?").trim().charAt(0).toUpperCase())}</span><span class="nm">${esc(user.displayName || user.email)}</span></button>
-    <div class="fb-menu" id="fbMenu" hidden><div><b>${esc(user.displayName || "")}</b><div class="role">${esc(user.email)} · ${label}</div></div>
+  w.innerHTML = `<button type="button" id="fbAcctBtn" aria-haspopup="true" aria-expanded="false"><span class="av"></span><span class="nm"></span></button>
+    <div class="fb-menu" id="fbMenu" hidden><div><b id="fbMName"></b><div class="role">${team ? "บัญชีทีม (รหัสผ่านทีม)" : esc(user.email)} · ${label}</div></div>
+    ${team ? `<button class="btn" type="button" id="fbRename">เปลี่ยนชื่อที่แสดง</button><button class="btn" type="button" id="fbPw">เปลี่ยนรหัสผ่านทีม</button>` : ""}
     ${role === "owner" ? `<button class="btn" type="button" id="fbMembers">จัดการผู้ใช้</button>` : ""}
     <button class="btn ghost" type="button" id="fbLogout">ออกจากระบบ</button></div>`;
-  host.appendChild(w);
+  const paint = () => { const n = shown() || "?"; w.querySelector(".av").textContent = n.trim().charAt(0).toUpperCase(); w.querySelector(".nm").textContent = n; w.querySelector("#fbMName").textContent = team ? n : (user.displayName || ""); };
+  paint(); host.appendChild(w);
+  if(team){
+    w.querySelector("#fbRename").onclick = () => { menu.hidden = true; modal("เปลี่ยนชื่อที่แสดง", `<label>ชื่อของคุณ<input id="fbNewName" maxlength="60" value="${esc(savedName())}" autocomplete="name"></label><p class="hint">ใช้กับการแก้ไขครั้งต่อไปในเครื่องนี้ ประวัติเดิมไม่เปลี่ยน</p>`, async out => {
+      const n = document.getElementById("fbNewName").value.trim(); if(!n){ out.textContent = "ใส่ชื่อก่อน"; return; } setName(n); paint(); out.textContent = "บันทึกแล้ว"; return true; }); };
+    w.querySelector("#fbPw").onclick = () => { menu.hidden = true; modal("เปลี่ยนรหัสผ่านทีม", `<label>รหัสผ่านปัจจุบัน<input id="fbPw0" type="password" autocomplete="current-password"></label>
+      <label>รหัสผ่านใหม่ (อย่างน้อย 8 ตัว)<input id="fbPw1" type="password" autocomplete="new-password"></label><label>พิมพ์รหัสผ่านใหม่อีกครั้ง<input id="fbPw2" type="password" autocomplete="new-password"></label>
+      <p class="hint">หลังเปลี่ยน เครื่องอื่นทุกเครื่องจะถูกให้ใส่รหัสใหม่ (ภายในประมาณ 1 ชั่วโมง) — แจ้งรหัสใหม่ให้ทีมด้วย</p>`, async out => {
+      const p0 = document.getElementById("fbPw0").value, p1 = document.getElementById("fbPw1").value, p2 = document.getElementById("fbPw2").value;
+      if(p1.length < 8){ out.textContent = "รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร"; return; } if(p1 !== p2){ out.textContent = "รหัสผ่านใหม่สองช่องไม่ตรงกัน"; return; }
+      try{ await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(TEAM_EMAIL, p0)); await updatePassword(auth.currentUser, p1); out.textContent = "เปลี่ยนรหัสผ่านทีมแล้ว"; return true; }
+      catch(err){ const code = err && err.code || String(err); out.textContent = (/invalid|wrong/.test(code) ? "รหัสผ่านปัจจุบันไม่ถูกต้อง" : /weak/.test(code) ? "รหัสผ่านใหม่ง่ายเกินไป" : "เปลี่ยนไม่สำเร็จ") + " (" + code + ")"; } }); };
+  }
   const btn = w.querySelector("#fbAcctBtn"), menu = w.querySelector("#fbMenu");
   btn.onclick = () => { menu.hidden = !menu.hidden; btn.setAttribute("aria-expanded", String(!menu.hidden)); };
   document.addEventListener("click", e => { if(!w.contains(e.target)){ menu.hidden = true; btn.setAttribute("aria-expanded","false"); } });
   if(role === "owner") w.querySelector("#fbMembers").onclick = () => { menu.hidden = true; membersDialog(); };
 }
 
+function modal(title, body, onSave){
+  let d = document.getElementById("fbModal2");
+  if(!d){ d = document.createElement("div"); d.id = "fbModal2"; d.className = "fb-modal"; d.setAttribute("role","dialog"); d.setAttribute("aria-modal","true"); d.setAttribute("aria-labelledby","fbM2Title"); document.body.appendChild(d); }
+  d.innerHTML = `<div class="box"><h2 id="fbM2Title">${esc(title)}</h2>${body}<p class="hint" id="fbM2Msg" role="status"></p>
+    <div class="row"><button class="btn primary" type="button" id="fbM2Save">บันทึก</button><button class="btn" type="button" id="fbM2Close">ปิด</button></div></div>`;
+  d.hidden = false;
+  const close = () => { d.hidden = true; };
+  d.querySelector("#fbM2Close").onclick = close;
+  d.querySelector("#fbM2Save").onclick = async () => { const b = d.querySelector("#fbM2Save"); b.disabled = true; try{ if(await onSave(d.querySelector("#fbM2Msg"))) setTimeout(close, 900); } finally { b.disabled = false; } };
+  d.onkeydown = e => { if(e.key === "Escape") close(); if(e.key === "Enter" && e.target.tagName === "INPUT") d.querySelector("#fbM2Save").click(); };
+  const f = d.querySelector("input"); if(f) f.focus();
+}
 async function membersDialog(){
   let m = { editors: [], viewers: [] };
   try{ const s = await getDoc(doc(fs, "access/members")); if(s.exists()) m = Object.assign(m, s.data()); }catch(_){}

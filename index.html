@@ -462,7 +462,7 @@ label.btn:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, signInWithEmailAndPassword, EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, signInWithEmailAndPassword, EmailAuthProvider, reauthenticateWithCredential, updatePassword, sendPasswordResetEmail, sendEmailVerification, updateProfile, reload, getIdToken } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const gate = document.getElementById("fbGate"), msg = document.getElementById("fbMsg"), act = document.getElementById("fbAct");
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -473,7 +473,7 @@ const say = (html, buttons) => { gate.hidden = false; msg.innerHTML = html; act.
 const DEFAULT_OWNERS = ["shipping@teckbeehang.com"];
 /* everyone on the team signs in to this one Firebase account with the team password (no mailbox is needed for it) */
 const DEFAULT_TEAM_EMAIL = "forwarder-team@teckbeehang.com";
-const WEB_BUILD = "2026-11-04h";
+const WEB_BUILD = "2026-11-04i";
 let cfg = null, why = "";
 try{
   const res = await fetch("./firebase-config.js?t=" + Date.now(), { cache: "no-store" });
@@ -509,29 +509,37 @@ const savedName = () => { try{ return localStorage.getItem(NAME_KEY) || ""; }cat
 let memName = "";
 const setName = n => { memName = n; try{ localStorage.setItem(NAME_KEY, n); }catch(_){} };
 const deviceId = (() => { let d = ""; try{ d = localStorage.getItem("tbh-device") || ""; if(!d){ d = Math.random().toString(36).slice(2, 10); localStorage.setItem("tbh-device", d); } }catch(_){ d = Math.random().toString(36).slice(2, 10); } return d; })();
-const teamForm = () => `<form id="fbTeamForm" class="gform">
-    <input id="fbName" required maxlength="60" placeholder="ชื่อของคุณ" aria-label="ชื่อของคุณ" autocomplete="name" value="${esc(savedName())}">
-    <input id="fbPass" type="password" required placeholder="รหัสผ่านทีม" aria-label="รหัสผ่านทีม" autocomplete="current-password">
+/* each person signs in with their own company e-mail + the password the admin set in Firebase (Authentication > Users) */
+const STAFF_DOMAIN = "@teckbeehang.com";
+const lastEmail = () => { try{ return localStorage.getItem("tbh-login-email") || ""; }catch(_){ return ""; } };
+const pwForm = email => `<form id="fbPwForm" class="gform">
+    <input id="fbPEmail" type="email" required placeholder="อีเมล เช่น name@teckbeehang.com" aria-label="อีเมล" autocomplete="username" value="${esc(email == null ? lastEmail() : email)}">
+    <input id="fbPass" type="password" required placeholder="รหัสผ่าน" aria-label="รหัสผ่าน" autocomplete="current-password">
     <button class="gbtn" type="submit">เข้าสู่ระบบ</button></form>
-  <button type="button" class="glink" id="fbAdmin">ผู้ดูแลระบบ: เข้าสู่ระบบด้วยอีเมล</button>`;
-const TEAM_MSG = "ใส่ชื่อของคุณและรหัสผ่านทีม<br><small>ชื่อจะแสดงในประวัติการแก้ไข · ระบบจำการเข้าสู่ระบบไว้ ไม่ต้องใส่ทุกครั้ง</small>";
-const loginOptions = () => teamForm();
-const adminOptions = () => loginBtn + emailForm() + `<button type="button" class="glink" id="fbBack">กลับไปเข้าสู่ระบบด้วยรหัสผ่านทีม</button>`;
-const TEAM_ERR = {
-  "auth/invalid-credential": "รหัสผ่านไม่ถูกต้อง", "auth/wrong-password": "รหัสผ่านไม่ถูกต้อง", "auth/invalid-login-credentials": "รหัสผ่านไม่ถูกต้อง",
-  "auth/user-not-found": "ยังไม่มีบัญชีทีมใน Firebase", "auth/too-many-requests": "ใส่รหัสผิดหลายครั้ง ระบบพักไว้ชั่วคราว รอสักครู่แล้วลองใหม่",
+  <button type="button" class="glink" id="fbForgot">ลืมรหัสผ่าน / ตั้งรหัสผ่านใหม่</button>
+  <button type="button" class="glink" id="fbAdmin">เข้าสู่ระบบด้วยลิงก์ทางอีเมล หรือ Google</button>`;
+const LOGIN_MSG = "เข้าสู่ระบบด้วยอีเมลบริษัทและรหัสผ่านของคุณ<br><small>ระบบจำการเข้าสู่ระบบไว้ ไม่ต้องใส่ทุกครั้ง</small>";
+const TEAM_MSG = LOGIN_MSG;
+const loginOptions = () => pwForm();
+const adminOptions = () => loginBtn + emailForm() + `<button type="button" class="glink" id="fbBack">กลับไปเข้าสู่ระบบด้วยรหัสผ่าน</button>`;
+const AUTH_ERR = {
+  "auth/invalid-credential": "อีเมลหรือรหัสผ่านไม่ถูกต้อง", "auth/wrong-password": "อีเมลหรือรหัสผ่านไม่ถูกต้อง", "auth/invalid-login-credentials": "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
+  "auth/user-not-found": "ไม่พบบัญชีนี้ใน Firebase", "auth/invalid-email": "รูปแบบอีเมลไม่ถูกต้อง",
+  "auth/too-many-requests": "ใส่รหัสผิดหลายครั้ง ระบบพักไว้ชั่วคราว รอ 10–15 นาทีแล้วลองใหม่",
   "auth/operation-not-allowed": "ยังไม่ได้เปิด Email/Password ใน Firebase › Authentication › Sign-in method",
-  "auth/user-disabled": "บัญชีทีมถูกปิดใช้งานใน Firebase", "auth/network-request-failed": "เชื่อมต่ออินเทอร์เน็ตไม่ได้ ลองใหม่อีกครั้ง" };
+  "auth/user-disabled": "บัญชีนี้ถูกปิดใช้งานใน Firebase", "auth/network-request-failed": "เชื่อมต่ออินเทอร์เน็ตไม่ได้ ลองใหม่อีกครั้ง",
+  "auth/missing-password": "ใส่รหัสผ่านก่อน" };
+const errText = err => { const code = err && err.code || String(err); return `${esc(AUTH_ERR[code] || "ไม่สำเร็จ")} (${esc(code)})`; };
 document.addEventListener("submit", async e => {
-  if(e.target.id === "fbNameForm"){ e.preventDefault(); const n = document.getElementById("fbName").value.trim(); if(!n) return; setName(n); if(pendingStart){ const f = pendingStart; pendingStart = null; f(); } return; }
-  if(e.target.id !== "fbTeamForm") return; e.preventDefault();
-  const n = document.getElementById("fbName").value.trim(), pw = document.getElementById("fbPass").value;
-  if(!n || !pw) return; setName(n);
+  if(e.target.id === "fbNameForm"){ e.preventDefault(); const n = document.getElementById("fbName").value.trim(); if(!n) return; if(pendingStart){ const f = pendingStart; pendingStart = null; f(n); } return; }
+  if(e.target.id !== "fbPwForm") return; e.preventDefault();
+  const email = document.getElementById("fbPEmail").value.trim().toLowerCase(), pw = document.getElementById("fbPass").value;
+  if(!email || !pw) return; try{ localStorage.setItem("tbh-login-email", email); }catch(_){}
   const b = e.target.querySelector("button"); b.disabled = true; b.textContent = "กำลังเข้าสู่ระบบ…";
-  try{ await signInWithEmailAndPassword(auth, TEAM_EMAIL, pw); }
-  catch(err){ const code = err && err.code || String(err);
-    const hint = /invalid|not-found/.test(code) ? `<br><small>ถ้าเพิ่งตั้งระบบ: ผู้ดูแลต้องสร้างบัญชี <code>${esc(TEAM_EMAIL)}</code> ใน Firebase › Authentication › Users ก่อน</small>` : "";
-    say(`<span class="gerr">${esc(TEAM_ERR[code] || "เข้าสู่ระบบไม่สำเร็จ")} (${esc(code)})</span>${hint}`, teamForm());
+  try{ await signInWithEmailAndPassword(auth, email, pw); }
+  catch(err){ const code = err && err.code || "";
+    const hint = /invalid-credential|wrong-password|not-found|login-credentials/.test(code) ? `<br><small>ตรวจว่าแป้นพิมพ์เป็นภาษาอังกฤษและไม่ได้เปิด Caps Lock · ถ้ายังไม่เคยตั้งรหัสหรือจำไม่ได้ กด “ลืมรหัสผ่าน” ด้านล่าง</small>` : "";
+    say(`<span class="gerr">${errText(err)}</span>${hint}`, pwForm(email));
     const pi = document.getElementById("fbPass"); if(pi) pi.focus(); }
 });
 const cleanUrl = () => location.href.split("#")[0].split("?")[0];
@@ -548,8 +556,17 @@ document.addEventListener("submit", async e => {
   catch(err){ say(`ส่งลิงก์ไม่สำเร็จ <span class="gerr">(${esc(err && err.code || err)})</span> — ตรวจว่าเปิด “Email link (passwordless sign-in)” ใน Firebase แล้ว`, adminOptions()); }
 });
 document.addEventListener("click", async e => {
-  if(e.target.closest("#fbBack")) say(TEAM_MSG, loginOptions());
-  if(e.target.closest("#fbAdmin")) say("ผู้ดูแลระบบ / บัญชีส่วนตัวที่ได้รับสิทธิ์", adminOptions());
+  if(e.target.closest("#fbBack")) say(LOGIN_MSG, loginOptions());
+  if(e.target.closest("#fbAdmin")) say("เข้าสู่ระบบด้วยลิงก์ทางอีเมล (ไม่ต้องใช้รหัสผ่าน) หรือบัญชี Google", adminOptions());
+  if(e.target.closest("#fbForgot")){
+    const i = document.getElementById("fbPEmail"), email = (i && i.value || "").trim().toLowerCase();
+    if(!email){ if(i){ i.focus(); i.setCustomValidity("ใส่อีเมลก่อน แล้วกดลืมรหัสผ่านอีกครั้ง"); i.reportValidity(); i.addEventListener("input", () => i.setCustomValidity(""), { once: true }); } return; }
+    try{ await sendPasswordResetEmail(auth, email);
+      say(`ส่งลิงก์ตั้งรหัสผ่านไปที่ <b>${esc(email)}</b> แล้ว<br><small>เปิดอีเมลจาก noreply@…firebaseapp.com › กดลิงก์ › ตั้งรหัสผ่านใหม่ › กลับมาเข้าสู่ระบบที่หน้านี้ (ไม่เห็นอีเมล ดูโฟลเดอร์ Junk / Spam · ถ้าอีเมลนี้ไม่มีบัญชีใน Firebase จะไม่มีอีเมลส่งไป)</small>`, pwForm(email)); }
+    catch(err){ say(`<span class="gerr">ส่งลิงก์ตั้งรหัสผ่านไม่สำเร็จ ${errText(err)}</span>`, pwForm(email)); }
+  }
+  if(e.target.closest("#fbResend")){ const u = auth.currentUser; if(u) try{ await sendEmailVerification(u); verifyNote("ส่งอีเมลยืนยันอีกครั้งแล้ว"); }catch(err){ verifyNote("ส่งไม่สำเร็จ " + errText(err)); } }
+  if(e.target.closest("#fbVerified")) checkVerified(true);
   if(e.target.closest("#fbLogin")){ try{ await signInWithPopup(auth, provider); }catch(err){
       if(err && /popup/.test(err.code || "")) return signInWithRedirect(auth, provider);
       say(`เข้าสู่ระบบไม่สำเร็จ <span class="gerr">(${esc(err && err.code || err)})</span>`, adminOptions()); } }
@@ -569,17 +586,41 @@ onAuthStateChanged(auth, async user => {
     say(TEAM_MSG, loginOptions()); return; }
   const email = (user.email || "").toLowerCase(), team = email === TEAM_EMAIL;
   if(team){
-    const go = () => start(user, "editor", null, true);
+    const go = n => { if(n) setName(n); start(user, "editor", null, true); };
     if(!savedName()){ pendingStart = go; say("ใส่ชื่อของคุณ (แสดงในประวัติการแก้ไข)", `<form id="fbNameForm" class="gform"><input id="fbName" required maxlength="60" placeholder="ชื่อของคุณ" aria-label="ชื่อของคุณ" autocomplete="name"><button class="gbtn" type="submit">เริ่มใช้งาน</button></form>`); return; }
     return go();
   }
+  if(!user.emailVerified){ verifyScreen(user); return; }
+  proceed(user);
+});
+/* first sign-in with a password set by the admin: prove the mailbox once (the database rules only trust verified e-mails) */
+let vTimer = null;
+function verifyNote(t){ const n = document.getElementById("fbVNote"); if(n) n.textContent = t; }
+async function verifyScreen(user){
+  const email = (user.email || "").toLowerCase();
+  say(`ยืนยันอีเมลครั้งแรก (ทำครั้งเดียว)<br><small>ระบบส่งลิงก์ยืนยันไปที่ <b>${esc(email)}</b> แล้ว — เปิดอีเมลจาก noreply@…firebaseapp.com กดลิงก์ยืนยัน แล้วกลับมาหน้านี้ (ไม่เห็น ดูโฟลเดอร์ Junk / Spam)</small><br><span class="gerr" id="fbVNote" role="status"></span>`,
+    `<button class="gbtn" type="button" id="fbVerified">ยืนยันแล้ว เข้าใช้งาน</button><button type="button" class="glink" id="fbResend">ส่งอีเมลยืนยันอีกครั้ง</button><button type="button" class="glink" id="fbLogout">ออกจากระบบ / เปลี่ยนบัญชี</button>`);
+  const key = "tbh-vsent-" + user.uid; let sent = false; try{ sent = !!sessionStorage.getItem(key); }catch(_){}
+  if(!sent){ try{ await sendEmailVerification(user); try{ sessionStorage.setItem(key, "1"); }catch(_){} }catch(err){ verifyNote("ส่งอีเมลยืนยันไม่สำเร็จ " + (err && err.code || err) + " — กดส่งอีกครั้ง"); } }
+  clearInterval(vTimer); vTimer = setInterval(() => checkVerified(false), 4000);
+}
+async function checkVerified(manual){
+  const u = auth.currentUser; if(!u || started) { clearInterval(vTimer); return; }
+  try{ await reload(u); }catch(_){}
+  if(auth.currentUser && auth.currentUser.emailVerified){ clearInterval(vTimer); try{ await getIdToken(auth.currentUser, true); }catch(_){} proceed(auth.currentUser); }
+  else if(manual) verifyNote("ยังไม่ได้ยืนยัน — กดลิงก์ในอีเมลก่อน แล้วกดปุ่มนี้อีกครั้ง");
+}
+async function proceed(user){
+  const email = (user.email || "").toLowerCase();
+  if(!user.displayName){ pendingStart = async n => { try{ await updateProfile(user, { displayName: n }); }catch(_){} proceed(user); };
+    say("ใส่ชื่อของคุณ (แสดงในประวัติการแก้ไขและการลงชื่อตรวจสอบ)", `<form id="fbNameForm" class="gform"><input id="fbName" required maxlength="60" placeholder="ชื่อ-นามสกุล หรือชื่อเล่น" aria-label="ชื่อของคุณ" autocomplete="name"><button class="gbtn" type="submit">เริ่มใช้งาน</button></form>`); return; }
   say(`กำลังตรวจสิทธิ์ของ ${esc(user.email)}…`);
-  let role = OWNERS.includes(email) ? "owner" : null, members = null;
+  let role = OWNERS.includes(email) ? "owner" : email.endsWith(STAFF_DOMAIN) ? "editor" : null, members = null;
   try{ const s = await getDoc(doc(fs, "access/members")); members = s.exists() ? s.data() : null; }catch(_){ members = null; }
   if(!role && members){ const has = k => (members[k] || []).map(x => String(x).toLowerCase()).includes(email); role = has("editors") ? "editor" : has("viewers") ? "viewer" : null; }
   if(!role){ say(`บัญชี <b>${esc(user.email)}</b> ยังไม่ได้รับสิทธิ์ใช้งาน<br>ส่งอีเมลนี้ให้ผู้ดูแลระบบเพิ่มใน “จัดการผู้ใช้” แล้วโหลดหน้านี้ใหม่`, `<button class="gbtn" type="button" id="fbLogout">ออกจากระบบ / เปลี่ยนบัญชี</button>`); return; }
   start(user, role, members, false);
-});
+}
 function start(user, role, members, team){
   if(started) return; started = true;
   if(!team) setDoc(doc(fs, "people/" + user.uid), { name: user.displayName || "", email: (user.email || "").toLowerCase(), at: Date.now() }).catch(() => {});
@@ -591,29 +632,31 @@ function start(user, role, members, team){
 function accountMenu(user, role, team){
   const host = document.querySelector("header.top"); if(!host) return;
   const label = { owner:"ผู้ดูแลระบบ", editor:"ผู้แก้ไข", viewer:"ดูอย่างเดียว" }[role];
-  const shown = () => team ? savedName() : (user.displayName || user.email);
+  const shown = () => team ? savedName() : (auth.currentUser && auth.currentUser.displayName || user.email);
   const w = document.createElement("div"); w.className = "fb-acct";
   w.innerHTML = `<button type="button" id="fbAcctBtn" aria-haspopup="true" aria-expanded="false"><span class="av"></span><span class="nm"></span></button>
     <div class="fb-menu" id="fbMenu" hidden><div><b id="fbMName"></b><div class="role">${team ? "บัญชีทีม (รหัสผ่านทีม)" : esc(user.email)} · ${label}</div></div>
-    ${team ? `<button class="btn" type="button" id="fbRename">เปลี่ยนชื่อที่แสดง</button><button class="btn" type="button" id="fbPw">เปลี่ยนรหัสผ่านทีม</button>` : ""}
+    <button class="btn" type="button" id="fbRename">เปลี่ยนชื่อที่แสดง</button><button class="btn" type="button" id="fbPw">${team ? "เปลี่ยนรหัสผ่านทีม" : "เปลี่ยนรหัสผ่าน"}</button>
     ${role === "owner" ? `<button class="btn" type="button" id="fbMembers">จัดการผู้ใช้</button>` : ""}
     <button class="btn" type="button" id="fbTheme"></button>
     <button class="btn ghost" type="button" id="fbLogout">ออกจากระบบ</button></div>`;
-  const paint = () => { const n = shown() || "?"; w.querySelector(".av").textContent = n.trim().charAt(0).toUpperCase(); w.querySelector(".nm").textContent = n; w.querySelector("#fbMName").textContent = team ? n : (user.displayName || ""); };
+  const paint = () => { const n = shown() || "?"; w.querySelector(".av").textContent = n.trim().charAt(0).toUpperCase(); w.querySelector(".nm").textContent = n; w.querySelector("#fbMName").textContent = n; };
   paint(); host.appendChild(w);
   const themeBtn = w.querySelector("#fbTheme"), root = document.documentElement;
   const themeLabel = () => { themeBtn.textContent = root.getAttribute("data-theme") === "dark" ? "☀ ใช้หน้าจอสว่าง" : "☾ ใช้หน้าจอมืด"; };
   themeLabel();
   themeBtn.onclick = () => { const t = root.getAttribute("data-theme") === "dark" ? "light" : "dark"; root.setAttribute("data-theme", t); try{ localStorage.setItem("tbh-theme", t); }catch(_){} themeLabel(); };
-  if(team){
-    w.querySelector("#fbRename").onclick = () => { menu.hidden = true; modal("เปลี่ยนชื่อที่แสดง", `<label>ชื่อของคุณ<input id="fbNewName" maxlength="60" value="${esc(savedName())}" autocomplete="name"></label><p class="hint">ใช้กับการแก้ไขครั้งต่อไปในเครื่องนี้ ประวัติเดิมไม่เปลี่ยน</p>`, async out => {
-      const n = document.getElementById("fbNewName").value.trim(); if(!n){ out.textContent = "ใส่ชื่อก่อน"; return; } setName(n); paint(); out.textContent = "บันทึกแล้ว"; return true; }); };
-    w.querySelector("#fbPw").onclick = () => { menu.hidden = true; modal("เปลี่ยนรหัสผ่านทีม", `<label>รหัสผ่านปัจจุบัน<input id="fbPw0" type="password" autocomplete="current-password"></label>
+  {
+    w.querySelector("#fbRename").onclick = () => { menu.hidden = true; modal("เปลี่ยนชื่อที่แสดง", `<label>ชื่อของคุณ<input id="fbNewName" maxlength="60" value="${esc(shown())}" autocomplete="name"></label><p class="hint">ใช้กับการแก้ไขครั้งต่อไปในเครื่องนี้ ประวัติเดิมไม่เปลี่ยน</p>`, async out => {
+      const n = document.getElementById("fbNewName").value.trim(); if(!n){ out.textContent = "ใส่ชื่อก่อน"; return; }
+      if(team) setName(n); else { try{ await updateProfile(auth.currentUser, { displayName: n }); setDoc(doc(fs, "people/" + user.uid), { name: n, email: (user.email || "").toLowerCase(), at: Date.now() }).catch(() => {}); }catch(err){ out.textContent = "บันทึกไม่สำเร็จ (" + (err && err.code || err) + ")"; return; } }
+      paint(); out.textContent = "บันทึกแล้ว"; return true; }); };
+    w.querySelector("#fbPw").onclick = () => { menu.hidden = true; modal(team ? "เปลี่ยนรหัสผ่านทีม" : "เปลี่ยนรหัสผ่าน", `<label>รหัสผ่านปัจจุบัน<input id="fbPw0" type="password" autocomplete="current-password"></label>
       <label>รหัสผ่านใหม่ (อย่างน้อย 8 ตัว)<input id="fbPw1" type="password" autocomplete="new-password"></label><label>พิมพ์รหัสผ่านใหม่อีกครั้ง<input id="fbPw2" type="password" autocomplete="new-password"></label>
-      <p class="hint">หลังเปลี่ยน เครื่องอื่นทุกเครื่องจะถูกให้ใส่รหัสใหม่ (ภายในประมาณ 1 ชั่วโมง) — แจ้งรหัสใหม่ให้ทีมด้วย</p>`, async out => {
+      <p class="hint">${team ? "หลังเปลี่ยน เครื่องอื่นทุกเครื่องจะถูกให้ใส่รหัสใหม่ (ภายในประมาณ 1 ชั่วโมง) — แจ้งรหัสใหม่ให้ทีมด้วย" : "จำรหัสปัจจุบันไม่ได้ หรือเคยเข้าด้วยลิงก์ทางอีเมล: ออกจากระบบแล้วกด “ลืมรหัสผ่าน” ที่หน้าเข้าสู่ระบบ"}</p>`, async out => {
       const p0 = document.getElementById("fbPw0").value, p1 = document.getElementById("fbPw1").value, p2 = document.getElementById("fbPw2").value;
       if(p1.length < 8){ out.textContent = "รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร"; return; } if(p1 !== p2){ out.textContent = "รหัสผ่านใหม่สองช่องไม่ตรงกัน"; return; }
-      try{ await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(TEAM_EMAIL, p0)); await updatePassword(auth.currentUser, p1); out.textContent = "เปลี่ยนรหัสผ่านทีมแล้ว"; return true; }
+      try{ await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(user.email, p0)); await updatePassword(auth.currentUser, p1); out.textContent = team ? "เปลี่ยนรหัสผ่านทีมแล้ว" : "เปลี่ยนรหัสผ่านแล้ว"; return true; }
       catch(err){ const code = err && err.code || String(err); out.textContent = (/invalid|wrong/.test(code) ? "รหัสผ่านปัจจุบันไม่ถูกต้อง" : /weak/.test(code) ? "รหัสผ่านใหม่ง่ายเกินไป" : "เปลี่ยนไม่สำเร็จ") + " (" + code + ")"; } }); };
   }
   const btn = w.querySelector("#fbAcctBtn"), menu = w.querySelector("#fbMenu");

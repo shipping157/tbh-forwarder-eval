@@ -1,5 +1,6 @@
 <!doctype html>
-<html lang="th">
+<html lang="th" data-theme="light">
+<script>try{var t=localStorage.getItem("tbh-theme");if(t==="dark")document.documentElement.setAttribute("data-theme","dark");}catch(e){}</script>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -472,7 +473,7 @@ const say = (html, buttons) => { gate.hidden = false; msg.innerHTML = html; act.
 const DEFAULT_OWNERS = ["shipping@teckbeehang.com"];
 /* everyone on the team signs in to this one Firebase account with the team password (no mailbox is needed for it) */
 const DEFAULT_TEAM_EMAIL = "forwarder-team@teckbeehang.com";
-const WEB_BUILD = "2026-11-04g";
+const WEB_BUILD = "2026-11-04h";
 let cfg = null, why = "";
 try{
   const res = await fetch("./firebase-config.js?t=" + Date.now(), { cache: "no-store" });
@@ -596,9 +597,14 @@ function accountMenu(user, role, team){
     <div class="fb-menu" id="fbMenu" hidden><div><b id="fbMName"></b><div class="role">${team ? "บัญชีทีม (รหัสผ่านทีม)" : esc(user.email)} · ${label}</div></div>
     ${team ? `<button class="btn" type="button" id="fbRename">เปลี่ยนชื่อที่แสดง</button><button class="btn" type="button" id="fbPw">เปลี่ยนรหัสผ่านทีม</button>` : ""}
     ${role === "owner" ? `<button class="btn" type="button" id="fbMembers">จัดการผู้ใช้</button>` : ""}
+    <button class="btn" type="button" id="fbTheme"></button>
     <button class="btn ghost" type="button" id="fbLogout">ออกจากระบบ</button></div>`;
   const paint = () => { const n = shown() || "?"; w.querySelector(".av").textContent = n.trim().charAt(0).toUpperCase(); w.querySelector(".nm").textContent = n; w.querySelector("#fbMName").textContent = team ? n : (user.displayName || ""); };
   paint(); host.appendChild(w);
+  const themeBtn = w.querySelector("#fbTheme"), root = document.documentElement;
+  const themeLabel = () => { themeBtn.textContent = root.getAttribute("data-theme") === "dark" ? "☀ ใช้หน้าจอสว่าง" : "☾ ใช้หน้าจอมืด"; };
+  themeLabel();
+  themeBtn.onclick = () => { const t = root.getAttribute("data-theme") === "dark" ? "light" : "dark"; root.setAttribute("data-theme", t); try{ localStorage.setItem("tbh-theme", t); }catch(_){} themeLabel(); };
   if(team){
     w.querySelector("#fbRename").onclick = () => { menu.hidden = true; modal("เปลี่ยนชื่อที่แสดง", `<label>ชื่อของคุณ<input id="fbNewName" maxlength="60" value="${esc(savedName())}" autocomplete="name"></label><p class="hint">ใช้กับการแก้ไขครั้งต่อไปในเครื่องนี้ ประวัติเดิมไม่เปลี่ยน</p>`, async out => {
       const n = document.getElementById("fbNewName").value.trim(); if(!n){ out.textContent = "ใส่ชื่อก่อน"; return; } setName(n); paint(); out.textContent = "บันทึกแล้ว"; return true; }); };
